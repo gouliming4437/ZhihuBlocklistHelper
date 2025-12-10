@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zhihu Blacklist Helper (Fixed API)
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.3
 // @description  Efficiently hide blocked content on Zhihu. Fixed "Block" button stuck on loading.
 // @match        *://www.zhihu.com/*
 // @grant        GM_getValue
@@ -17,9 +17,7 @@
         get config() {
             return GM_getValue("Config", {
                 hideBlocked: false,
-                tempShow: false,
-                hideBlockBtn: false,
-                blockNonAnswers: true
+                tempShow: false
             });
         },
         set config(val) { GM_setValue("Config", val); },
@@ -44,8 +42,20 @@
 
         // Helper to get XSRF token from cookies (Required for blocking)
         getXsrfToken() {
-            const match = document.cookie.match(/xsrf-token=([^;]+)/);
-            return match ? match[1] : '';
+            // Try common cookie name variations
+            const patterns = [
+                /_xsrf=([^;]+)/,
+                /xsrf-token=([^;]+)/,
+                /XSRF-TOKEN=([^;]+)/,
+                /xsrf_token=([^;]+)/
+            ];
+
+            for (const pattern of patterns) {
+                const match = document.cookie.match(pattern);
+                if (match) return decodeURIComponent(match[1]);
+            }
+
+            return '';
         }
 
         async syncBlockList() {
@@ -61,6 +71,9 @@
             try {
                 while (!isEnd) {
                     const response = await fetch(`https://www.zhihu.com/api/v3/settings/blocked_users?limit=20&offset=${offset}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
                     const json = await response.json();
                     if (!json.data) break;
                     json.data.forEach(user => {
@@ -71,11 +84,19 @@
                 }
                 Store.blockedList = newBlockedList;
                 console.log(`[ZBH] Synced ${newBlockedList.length} users.`);
+                if(btn) btn.textContent = "⚙️";
             } catch (err) {
                 console.error("[ZBH] Sync failed", err);
+                if(btn) {
+                    btn.textContent = "❌";
+                    btn.title = "Sync failed. Click to retry.";
+                    setTimeout(() => {
+                        btn.textContent = "⚙️";
+                        btn.title = "";
+                    }, 3000);
+                }
             } finally {
                 this.isFetching = false;
-                if(btn) btn.textContent = "⚙️";
             }
         }
 
@@ -204,6 +225,18 @@
             const method = isBlocked ? "DELETE" : "POST";
             const url = `https://www.zhihu.com/api/v4/members/${slug}/actions/block`;
 
+            // Check for XSRF token before making request
+            const xsrfToken = this.getXsrfToken();
+            if (!xsrfToken) {
+                btnElement.textContent = "Login required";
+                btnElement.title = "Please log in to Zhihu";
+                setTimeout(() => {
+                    btnElement.textContent = isBlocked ? "Blocked" : "Block";
+                    btnElement.title = "";
+                }, 2000);
+                return;
+            }
+
             btnElement.disabled = true;
             btnElement.textContent = "...";
 
@@ -211,7 +244,7 @@
                 const res = await fetch(url, {
                     method: method,
                     headers: {
-                        'x-xsrf-token': this.getXsrfToken(), // Security Header
+                        'x-xsrf-token': xsrfToken, // Security Header
                         'Content-Type': 'application/json'
                     }
                 });
@@ -226,6 +259,7 @@
                     btnElement.classList.toggle('Button--red', newStatus);
                     btnElement.classList.toggle('Button--blue', !newStatus);
                     btnElement.textContent = newStatus ? "Blocked" : "Block";
+                    btnElement.title = "";
 
                     // Force a re-scan to update UI visibility immediately
                     document.querySelectorAll(`[data-zbh-processed]`).forEach(el => {
@@ -236,12 +270,31 @@
                     });
                     this.scanPage();
                 } else {
-                    console.error("Block failed", res.status);
-                    btnElement.textContent = "Error";
+                    // Better error messages based on status code
+                    let errorMsg;
+                    if (res.status === 401 || res.status === 403) {
+                        errorMsg = "Auth failed";
+                    } else if (res.status === 429) {
+                        errorMsg = "Rate limited";
+                    } else {
+                        errorMsg = `Error ${res.status}`;
+                    }
+                    console.error(`[ZBH] Block action failed: ${res.status}`);
+                    btnElement.textContent = errorMsg;
+                    btnElement.title = `Failed to ${isBlocked ? 'unblock' : 'block'}. Click to retry.`;
+                    setTimeout(() => {
+                        btnElement.textContent = isBlocked ? "Blocked" : "Block";
+                        btnElement.title = "";
+                    }, 2500);
                 }
             } catch (err) {
-                console.error(err);
-                btnElement.textContent = "Err";
+                console.error("[ZBH] Network error:", err);
+                btnElement.textContent = "Network error";
+                btnElement.title = "Check your connection";
+                setTimeout(() => {
+                    btnElement.textContent = isBlocked ? "Blocked" : "Block";
+                    btnElement.title = "";
+                }, 2500);
             } finally {
                 btnElement.disabled = false;
             }
@@ -261,25 +314,51 @@
 
         toggleSettingsPanel() {
             let panel = document.getElementById('zbh-panel');
-            if (panel) { panel.remove(); return; }
+            let overlay = document.getElementById('zbh-overlay');
+            if (panel) {
+                panel.remove();
+                if (overlay) overlay.remove();
+                return;
+            }
+
             const cfg = Store.config;
+
+            // Create overlay backdrop
+            overlay = document.createElement('div');
+            overlay.id = 'zbh-overlay';
+            overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); z-index: 9998; cursor: pointer;`;
+
+            // Create panel
             panel = document.createElement('div');
             panel.id = 'zbh-panel';
             panel.style.cssText = `position: fixed; bottom: 130px; right: 20px; z-index: 9999; background: white; border: 1px solid #ebebeb; padding: 15px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 14px; min-width: 250px;`;
 
             const createCheck = (label, key) => `<div style="margin-bottom: 8px;"><label style="cursor:pointer; display:flex; align-items:center;"><input type="checkbox" id="zbh-${key}" ${cfg[key] ? 'checked' : ''} style="margin-right:8px;">${label}</label></div>`;
 
-            panel.innerHTML = `<div style="font-weight:bold; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:5px;">Blacklist Helper</div>${createCheck("Hide items completely", "hideBlocked")}${createCheck("Show 'Blocked' placeholder", "tempShow")}${createCheck("Hide Block Button (if hidden)", "hideBlockBtn")}${createCheck("Block non-answer posts", "blockNonAnswers")}<div style="margin-top:15px; display:flex; justify-content:space-between;"><button id="zbh-refresh" style="cursor:pointer; background:none; border:none; color:#175199;">🔄 Sync</button><button id="zbh-save" style="cursor:pointer; background:#0084ff; color:white; border:none; padding:5px 10px; border-radius:4px;">Save</button></div>`;
+            panel.innerHTML = `<div style="font-weight:bold; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:5px;">Blacklist Helper</div>${createCheck("Hide items completely", "hideBlocked")}${createCheck("Show 'Blocked' placeholder", "tempShow")}<div style="margin-top:15px; display:flex; justify-content:space-between;"><button id="zbh-refresh" style="cursor:pointer; background:none; border:none; color:#175199;">🔄 Sync</button><button id="zbh-save" style="cursor:pointer; background:#0084ff; color:white; border:none; padding:5px 10px; border-radius:4px;">Save</button></div>`;
+
+            // Append overlay and panel
+            document.body.appendChild(overlay);
             document.body.appendChild(panel);
+
+            // Close panel when clicking outside (on overlay)
+            overlay.onclick = () => {
+                panel.remove();
+                overlay.remove();
+            };
+
+            // Prevent panel clicks from closing the overlay
+            panel.onclick = (e) => {
+                e.stopPropagation();
+            };
 
             document.getElementById('zbh-save').onclick = () => {
                 Store.config = {
                     hideBlocked: document.getElementById('zbh-hideBlocked').checked,
-                    tempShow: document.getElementById('zbh-tempShow').checked,
-                    hideBlockBtn: document.getElementById('zbh-hideBlockBtn').checked,
-                    blockNonAnswers: document.getElementById('zbh-blockNonAnswers').checked,
+                    tempShow: document.getElementById('zbh-tempShow').checked
                 };
                 panel.remove();
+                overlay.remove();
                 document.querySelectorAll('[data-zbh-processed]').forEach(el => el.removeAttribute('data-zbh-processed'));
                 this.scanPage();
             };
