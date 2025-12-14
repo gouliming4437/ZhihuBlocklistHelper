@@ -45,9 +45,9 @@ This userscript improves your Zhihu browsing experience by:
 ### First Time Setup
 
 When you first visit Zhihu after installing the script:
-1. A gear icon (™) will appear in the bottom-right corner
+1. A gear icon will appear in the bottom-right corner
 2. The script automatically syncs your blocklist from Zhihu
-3. During sync, the icon temporarily shows ó
+3. During sync, the icon temporarily shows hourglass
 
 ### Blocking/Unblocking Users
 
@@ -58,18 +58,18 @@ When you first visit Zhihu after installing the script:
 
 ### Settings Panel
 
-Click the floating gear icon (™) to open the settings panel:
+Click the floating gear icon to open the settings panel:
 
 - **Hide items completely**: When enabled, blocked content is completely removed from view
 - **Show 'Blocked' placeholder**: When enabled with hiding, shows a clickable placeholder instead of removing items entirely
-- **= Sync**: Manually refresh your blocklist from Zhihu's servers
+- **Sync**: Manually refresh your blocklist from Zhihu's servers
 - **Save**: Apply your settings changes
 
 ### Settings Combinations
 
 - **Both OFF**: Blocked content remains visible (baseline behavior)
 - **Hide ON, Placeholder OFF**: Blocked items completely disappear
-- **Hide ON, Placeholder ON**: Shows "=« Blocked content from [username]" - click to reveal
+- **Hide ON, Placeholder ON**: Shows "Blocked content from [username]" - click to reveal
 - **Hide OFF, Placeholder ON**: Same as both OFF (placeholder only works with hide enabled)
 
 ## Technical Details
@@ -93,13 +93,13 @@ Click the floating gear icon (™) to open the settings panel:
 ### Sync shows L error
 - Check your internet connection
 - The Zhihu API may be temporarily unavailable
-- Click the gear icon and try "= Sync" again
+- Click the gear icon and try to Sync again
 
 ### Blocked content still appears
 - Click the gear icon to open settings
 - Enable "Hide items completely"
 - Click "Save"
-- Alternatively, click "= Sync" to refresh your blocklist
+- Alternatively, click "Sync" to refresh your blocklist
 
 ## Privacy & Security
 
